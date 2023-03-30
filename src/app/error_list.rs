@@ -42,6 +42,28 @@ where
   pub fn clear(&mut self) {
     self.errors.clear()
   }
+
+  fn show_all(&mut self, ui: &mut egui::Ui) {
+    for (category, errors) in &self.errors {
+      egui::CollapsingHeader::new(egui::RichText::from(category.name()).heading())
+        .default_open(true)
+        .show(ui, |ui| {
+          for error in errors {
+            ui.label(error.to_string());
+          }
+        })
+        .header_response
+        .on_hover_text(category.description());
+    }
+  }
+
+  fn show_one(&mut self, ui: &mut egui::Ui) {
+    for (_, errors) in &self.errors {
+      for error in errors {
+        ui.label(error.to_string());
+      }
+    }
+  }
 }
 
 impl<C> ErrorList<C>
@@ -49,20 +71,10 @@ where
   C: Category,
 {
   pub fn show(&mut self, ui: &mut egui::Ui) {
-    egui::ScrollArea::new([false, true])
-      .auto_shrink([true; 2])
-      .show(ui, |ui| {
-        for (category, errors) in &self.errors {
-          egui::CollapsingHeader::new(egui::RichText::from(category.name()).heading())
-            .default_open(true)
-            .show(ui, |ui| {
-              for error in errors {
-                ui.label(error.to_string());
-              }
-            })
-            .header_response
-            .on_hover_text(category.description());
-        }
-      });
+    if self.errors.len() != 1 {
+      self.show_all(ui);
+    } else {
+      self.show_one(ui);
+    }
   }
 }

@@ -28,6 +28,7 @@ where
   border: bool,
   selectable: bool,
   show_tooltips: bool,
+  scroll: [bool; 2],
 }
 
 impl<T> ItemList<T, ()>
@@ -45,6 +46,7 @@ where
       border: true,
       selectable: true,
       show_tooltips: true,
+      scroll: [false, true],
     }
   }
 }
@@ -56,6 +58,10 @@ where
   egui::WidgetText: From<<T as Iterator>::Item>,
   V: Validator<<T as Iterator>::Item>,
 {
+  pub(crate) fn scrollable(self, scroll: [bool; 2]) -> Self {
+    Self { scroll, ..self }
+  }
+
   pub fn with_validation<F>(self, validation: F) -> ItemList<T, F>
   where
     F: Validator<<T as Iterator>::Item>,
@@ -68,6 +74,7 @@ where
       border: self.border,
       selectable: self.selectable,
       show_tooltips: self.show_tooltips,
+      scroll: self.scroll,
     }
   }
 
@@ -94,27 +101,29 @@ where
   }
 
   pub fn show(self, selection: &mut Option<SelectionRange>, ui: &mut egui::Ui) {
-    ui.push_id(self.id_source, |child_ui| {
+    ui.push_id(self.id_source, |ui| {
       if self.border {
-        egui::Frame::group(child_ui.style()).show(child_ui, |ui| self.show_contents(selection, ui));
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+          if self.scroll.iter().any(|b| *b) {
+            self.show_scrollable(selection, ui);
+          } else {
+            let len = self.items.len();
+            self.show_contents(selection, 0..len, ui);
+          }
+        });
       } else {
-        self.show_contents(selection, child_ui);
+        if self.scroll.iter().any(|b| *b) {
+          self.show_scrollable(selection, ui);
+        } else {
+          let len = self.items.len();
+          self.show_contents(selection, 0..len, ui);
+        }
       }
     });
   }
 
-  fn show_contents(self, selection: &mut Option<SelectionRange>, ui: &mut egui::Ui) {
-    let Self {
-      items,
-      id_source,
-      validation,
-      shrink,
-      selectable,
-      show_tooltips,
-      border: _,
-    } = self;
-
-    let height = if selectable {
+  fn show_scrollable(self, selection: &mut Option<SelectionRange>, ui: &mut egui::Ui) {
+    let height = if self.selectable {
       ui.text_style_height(&egui::TextStyle::Button)
         .max(ui.spacing().interact_size.y)
     } else {
@@ -122,49 +131,71 @@ where
     };
 
     egui::ScrollArea::new([false, true])
-      .id_source(id_source.with("_scroll_area"))
-      .auto_shrink(shrink)
-      .show_rows(ui, height, items.len(), |ui, range| {
+      .auto_shrink(self.shrink)
+      .scroll2(self.scroll)
+      .id_source(self.id_source.with("_scroll_area"))
+      .show_rows(ui, height, self.items.len(), |ui, range| {
         ui.skip_ahead_auto_ids(range.start);
-
-        ui.with_layout(ui.layout().with_cross_justify(true), |ui| {
-          for (value, i) in items.skip(range.start).zip(range.into_iter()) {
-            ui.scope(|ui| {
-              if !validation.as_ref().map_or(true, |v| v.validate(&value)) {
-                ui.style_mut().visuals.override_text_color = Some(egui::Color32::RED);
-              }
-
-              let mut response = if selectable {
-                ui.selectable_label(selection.as_ref().map_or(false, |r| r.contains(&i)), value)
-              } else {
-                ui.label(value)
-              };
-              if show_tooltips {
-                response = response.on_hover_text(value);
-              }
-
-              if response.clicked() {
-                if ui.input(|i| i.modifiers.shift_only()) {
-                  let r = selection.get_or_insert((i..i + 1).into());
-                  if !r.contains(&i) {
-                    let mut new_r = r.start().unwrap()..r.end().unwrap();
-                    if new_r.start > i {
-                      new_r.start = i;
-                    } else if new_r.end <= i {
-                      new_r.end = i + 1;
-                    }
-                    r.add(new_r);
-                  }
-                } else if ui.input(|i| i.modifiers.command_only()) {
-                  selection.get_or_insert(Default::default()).add(i..i + 1);
-                } else {
-                  *selection = Some((i..i + 1).into());
-                }
-              }
-            });
-          }
-        })
+        self.show_contents(selection, range, ui)
       });
+  }
+
+  fn show_contents(
+    self,
+    selection: &mut Option<SelectionRange>,
+    range: std::ops::Range<usize>,
+    ui: &mut egui::Ui,
+  ) {
+    let Self {
+      items,
+      validation,
+      selectable,
+      show_tooltips,
+      // used previously
+      id_source: _,
+      shrink: _,
+      scroll: _,
+      border: _,
+    } = self;
+
+    ui.with_layout(ui.layout().with_cross_justify(true), |ui| {
+      for (value, i) in items.skip(range.start).zip(range.into_iter()) {
+        ui.scope(|ui| {
+          let mut text = egui::WidgetText::from(value);
+          if !validation.as_ref().map_or(true, |v| v.validate(&value)) {
+            text = text.color(ui.visuals().error_fg_color);
+          }
+
+          let mut response = if selectable {
+            ui.selectable_label(selection.as_ref().map_or(false, |r| r.contains(&i)), text)
+          } else {
+            ui.label(text)
+          };
+          if show_tooltips {
+            response = response.on_hover_text(value);
+          }
+
+          if response.clicked() {
+            if ui.input(|i| i.modifiers.shift_only()) {
+              let r = selection.get_or_insert((i..i + 1).into());
+              if !r.contains(&i) {
+                let mut new_r = r.start().unwrap()..r.end().unwrap();
+                if new_r.start > i {
+                  new_r.start = i;
+                } else if new_r.end <= i {
+                  new_r.end = i + 1;
+                }
+                r.add(new_r);
+              }
+            } else if ui.input(|i| i.modifiers.command_only()) {
+              selection.get_or_insert(Default::default()).add(i..i + 1);
+            } else {
+              *selection = Some((i..i + 1).into());
+            }
+          }
+        });
+      }
+    });
   }
 }
 

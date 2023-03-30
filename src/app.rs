@@ -1,6 +1,7 @@
 mod actions;
 mod error_list;
 mod file_groups;
+mod help;
 mod options;
 mod work;
 
@@ -22,6 +23,7 @@ pub(crate) mod shortcuts {
   pub const SELECT_ALL: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, A);
   pub const HELP: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, F1);
   pub const REMOVE: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Delete);
+  pub const ESC: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Escape);
 
   pub(crate) trait UiButtonShortcut {
     #[must_use]
@@ -47,17 +49,21 @@ pub(crate) mod shortcuts {
 enum Windows {
   Options,
   Error,
-  ValidationMessage,
-  ConversionEndMessage,
+  ConversionEndMessage(Vec<String>),
+  InvalidEntries,
+  Usage,
+  About,
 }
 
 impl From<&Windows> for egui::WidgetText {
   fn from(value: &Windows) -> Self {
     match value {
-      Windows::Options => Self::from(egui::RichText::from("Conversion Options")),
-      Windows::Error => Self::from(egui::RichText::from("Could Not Complete")),
-      Windows::ValidationMessage => Self::from(egui::RichText::from("Validation Failed")),
-      Windows::ConversionEndMessage => Self::from(egui::RichText::from("Conversion Successful")),
+      Windows::Options => Self::from("Conversion Options"),
+      Windows::Error => Self::from("Could Not Complete"),
+      Windows::ConversionEndMessage(_) => Self::from("Conversion Successful"),
+      Windows::InvalidEntries => Self::from("Invalid Entries"),
+      Windows::Usage => Self::from("Usage"),
+      Windows::About => Self::from("About"),
     }
   }
 }
@@ -69,7 +75,6 @@ pub struct RaMp64<'a> {
   file_groups: FileGroups,
   worker: std::sync::mpsc::Sender<Work>,
   result_receiver: std::sync::mpsc::Receiver<WorkResult>,
-  validated: bool,
   window_show_queue: VecDeque<Windows>,
 }
 
@@ -87,7 +92,6 @@ impl<'a> RaMp64<'a> {
       file_groups: FileGroups::default(),
       worker,
       result_receiver,
-      validated: false,
       window_show_queue: VecDeque::new(),
     }
   }
@@ -103,7 +107,6 @@ impl<'a> RaMp64<'a> {
   fn check_scan_result(&mut self, scan_result: ScanDirResult) {
     match scan_result {
       Ok(files) => {
-        self.validated = false;
         self.file_groups.add_files(files);
       }
       Err(error) => {
@@ -186,7 +189,6 @@ impl<'a> eframe::App for RaMp64<'a> {
         OpenOptions => self.window_show_queue.push_back(Windows::Options),
         AddFile(selected_file) => {
           if check_can_add_file(&selected_file) {
-            self.validated = false;
             self.file_groups.add_file(selected_file);
           }
         }
@@ -197,7 +199,14 @@ impl<'a> eframe::App for RaMp64<'a> {
         RemoveAll => self.file_groups.clear(),
         RemoveSelected => self.file_groups.remove_selected(),
         Quit => frame.close(),
-        Help => {}
+        Usage => self.window_show_queue.push_back(Windows::Usage),
+        Escape => {
+          if self.window_show_queue.pop_front().is_none() {
+            frame.close();
+          }
+        }
+        ShowInvalid => self.window_show_queue.push_back(Windows::InvalidEntries),
+        About => self.window_show_queue.push_back(Windows::About),
       }
     }
 
@@ -220,45 +229,30 @@ impl<'a> eframe::App for RaMp64<'a> {
       let mut items_ui = ui.child_ui(items_max_rect, *ui.layout());
       ui.allocate_rect(items_max_rect, egui::Sense::hover());
 
-      let item_updated = self.file_groups.show(&mut items_ui);
-      if item_updated && self.validated {
-        self.validated = false;
-      }
+      self.file_groups.show(&mut items_ui);
 
       ui.horizontal(|ui| {
-        ui.label("Output Folder");
+        ui.label("Output Directory");
         ui.centered_and_justified(|ui| {
           ui.browse(&mut self.options.output_dir, Browse::pick_directory());
         });
       });
 
       ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        if ui.button("Close").clicked() {
-          frame.close();
-        }
-        ui.add_enabled_ui(self.validated, |ui| {
+        ui.add_enabled_ui(self.file_groups.are_all_valid(), |ui| {
           if ui.button("Convert").clicked() {
-            let group_count = self.file_groups.len();
             let had_errors = self.errors.has_errors();
-            self.file_groups.convert(&self.options, &mut self.errors);
+            let success = self.file_groups.convert(&self.options, &mut self.errors);
             if !had_errors && self.errors.has_errors() {
               self.window_show_queue.push_back(Windows::Error)
             }
-            if group_count != self.file_groups.len() {
+            if !success.is_empty() {
               self
                 .window_show_queue
-                .push_back(Windows::ConversionEndMessage);
+                .push_back(Windows::ConversionEndMessage(success));
             }
           }
         });
-        ui.add_enabled_ui(!self.validated && !self.file_groups.is_empty(), |ui| {
-          if ui.button("Validate").clicked() {
-            self.validated = self.file_groups.validate();
-            if !self.validated {
-              self.window_show_queue.push_back(Windows::ValidationMessage);
-            }
-          }
-        })
       });
     });
 
@@ -266,41 +260,72 @@ impl<'a> eframe::App for RaMp64<'a> {
       let mut showing = true;
       let window = self.window_show_queue.front().unwrap();
       egui::Window::new(window)
-        .anchor(egui::Align2::CENTER_CENTER, [0.0, -30.0])
-        .constrain(true)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, -10.0])
         .collapsible(false)
-        .resizable(false)
+        .default_size(ctx.screen_rect().size() * 0.85)
         .open(&mut showing)
+        .resize(|r| {
+          r.max_size(ctx.screen_rect().size() * 0.85)
+            .min_size(ctx.screen_rect().size() * 0.5)
+        })
+        .resizable(false)
+        .vscroll(true)
         .show(ctx, |ui| match window {
+          Windows::Usage => help::Usage::default().show(ui),
           Windows::Options => self.options.show(ui),
           Windows::Error => self.errors.show(ui),
-          Windows::ValidationMessage => {
-            ui.label("The following entries have validation errors:");
-            ui.add_space(1.0);
+          Windows::InvalidEntries => {
+            ui.label("The following entries are missing files:");
+            ui.add_space(3.0);
 
-            self
-              .file_groups
-              .show_filtered(ui, |item: &file_groups::GroupItem| !item.is_valid());
-          }
-          Windows::ConversionEndMessage => {
-            ui.vertical_centered(|ui| {
-              ui.label(format!(
-                "{} files where converted successfully!",
-                if self.file_groups.is_empty() {
-                  "All"
-                } else {
-                  "Some"
-                }
-              ));
+            ui.scope(|ui| {
+              ui.visuals_mut().indent_has_left_vline = false;
+              ui.indent("invalid_entries", |ui| {
+                self
+                  .file_groups
+                  .show_filtered(ui, |item: &file_groups::GroupItem| !item.is_valid());
+              });
             });
+          }
+          Windows::ConversionEndMessage(entries) => {
+            if self.file_groups.is_empty() {
+              ui.label(format!("All files where converted successfully!",));
+            } else {
+              ui.label(format!(
+                "{} files where converted successfully.",
+                entries.len()
+              ));
+            }
+
             if let Some(path) = &self.options.output_dir {
-              ui.horizontal(|ui| {
-                ui.label("Files where saved to:");
-                if ui.link(format!("{}", path.display())).clicked() {
-                  open::that_in_background(path);
+              if ui.link("Open output folder").clicked() {
+                open::that_in_background(path);
+              }
+            }
+            ui.scope(|ui| {
+              ui.visuals_mut().indent_has_left_vline = false;
+              ui.indent("success_entries", |ui| {
+                for entry in entries {
+                  ui.label(entry);
                 }
               });
-            }
+            });
+          }
+          Windows::About => {
+            ui.heading("RaMp64 Converter GUI");
+            ui.label("A minimal Rust-powered application built using egui.");
+            ui.add_space(20.0);
+            ui.heading("Links");
+            ui.hyperlink_to(
+              "\u{e624} ramp64-convert-gui in GitHub",
+              "https://github.com/drehren/ramp64-convert-gui",
+            );
+            ui.hyperlink_to(
+              "\u{e624} ra_mp64_srm_convert in GitHub",
+              "https://github.com/drehren/ra_mp64_srm_convert",
+            );
+            ui.hyperlink_to("egui home", "https://egui.rs");
+            ui.hyperlink_to("Rust home", "https://www.rust-lang.org");
           }
         });
       if !showing {

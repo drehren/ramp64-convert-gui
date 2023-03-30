@@ -87,16 +87,12 @@ impl FileGroups {
     }
   }
 
-  pub(crate) fn validate(&mut self) -> bool {
-    self
-      .groups
-      .values_mut()
-      .map(|g| g.is_valid())
-      .reduce(|a, b| a && b)
-      .unwrap()
-  }
-
-  pub(crate) fn convert(&mut self, options: &Options, errors: &mut ErrorList<ErrorCategory>) {
+  pub(crate) fn convert(
+    &mut self,
+    options: &Options,
+    errors: &mut ErrorList<ErrorCategory>,
+  ) -> Vec<String> {
+    let mut converted_successfully = Vec::with_capacity(self.groups.len());
     self.selection = None;
     for (key, group) in std::mem::take(&mut self.groups) {
       if let Err((error, group)) = group.convert(options) {
@@ -105,12 +101,15 @@ impl FileGroups {
           ErrorCategory::Conversion,
           ItemConversionError { group: key, error },
         );
+      } else {
+        converted_successfully.push(key)
       }
     }
+    converted_successfully
   }
 
-  pub(crate) fn len(&self) -> usize {
-    self.groups.len()
+  pub(crate) fn are_all_valid(&self) -> bool {
+    !self.groups.is_empty() && self.groups.values().all(GroupItem::is_valid)
   }
 }
 
@@ -148,7 +147,7 @@ macro_rules! pick_file {
     let changed = $ui.with_layout($ui.layout().with_main_justify(true), |ui| {
       ui.set_enabled($enabled);
       if !$valid {
-        ui.style_mut().visuals.override_text_color = Some(egui::Color32::RED);
+        ui.visuals_mut().override_text_color = Some(ui.visuals().error_fg_color);
       }
       ui.browse(
         $file_mut,
@@ -178,8 +177,9 @@ impl FileGroups {
 
     ItemList::new(items.iter().copied(), "filtered_entries")
       .auto_shrink([true; 2])
-      .show_border(false)
+      .scrollable([false; 2])
       .selectable(false)
+      .show_border(false)
       .with_tooltips(false)
       .show(&mut None, ui);
   }
@@ -253,6 +253,7 @@ impl FileGroups {
       );
 
     ItemList::new(self.groups.keys(), "entries")
+      .with_tooltips(false)
       .with_validation(|key: &&String| self.groups[*key].is_valid())
       .show(&mut self.selection, ui);
     item_updated

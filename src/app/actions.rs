@@ -13,7 +13,10 @@ pub(crate) enum Action {
   RemoveAll,
   RemoveSelected,
   Quit,
-  Help,
+  Usage,
+  Escape,
+  ShowInvalid,
+  About,
 }
 
 macro_rules! make_is_match_fn {
@@ -86,7 +89,8 @@ impl<'f> Actions<'f> {
               .consume_shortcut(&REMOVE)
               .then_some(Action::RemoveSelected)
           })
-          .or_else(|| input.consume_shortcut(&HELP).then_some(Action::Help))
+          .or_else(|| input.consume_shortcut(&HELP).then_some(Action::Usage))
+          .or_else(|| input.consume_shortcut(&ESC).then_some(Action::Escape))
       })
     })
   }
@@ -149,12 +153,27 @@ impl<'f> Actions<'f> {
           if ui.button("Remove All").clicked() {
             self.set_action(Action::RemoveAll, ui);
           }
+
+          ui.separator();
+
+          if ui.button("Show Invalid").clicked() {
+            self.set_action(Action::ShowInvalid, ui);
+          }
         });
       });
 
-      if ui.button("Help").clicked() {
-        self.set_action(Action::Help, ui);
-      }
+      ui.menu_button("Help", |ui| {
+        if ui.button("Show Usage").clicked() {
+          self.set_action(Action::Usage, ui);
+        }
+        if ui.button("View Wiki Help").clicked() {
+          open::that_in_background("https://github.com/drehren/ramp64-convert-gui/wiki/Help");
+        }
+        ui.separator();
+        if ui.button("About").clicked() {
+          self.set_action(Action::About, ui);
+        }
+      });
     });
   }
 }

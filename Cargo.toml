@@ -2,7 +2,7 @@
 name = "ramp64-convert-gui"
 description = "A simple GUI for ra_mp64_srm_convert"
 include = ["src/**/*", "Cargo.toml", "LICENSE", "README.md"]
-version = "1.0.0"
+version = "1.0.1"
 authors = ["Daniel Rehren <daniel.rehren.a@gmail.com>"]
 edition = "2021"
 readme = "README.md"
