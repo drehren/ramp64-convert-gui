@@ -4,6 +4,11 @@ A minimal GUI application to convert between libretro's Mupen64-Plus core save f
 
 Usage help [here](https://github.com/drehren/ramp64-convert-gui/wiki/Help).
 
+This is a GUI application.
+
+For a console application, see [ra_mp64_srm_convert](https://github.com/drehren/ra_mp64_srm_convert). 
+For a web-based one see [ramp64-convert-web](https://github.com/drehren/ramp64-convert-web)
+
 ## TL;DR
 
 1. `File` > `Add File` to add a single file to convert.
