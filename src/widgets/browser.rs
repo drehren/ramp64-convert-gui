@@ -102,7 +102,7 @@ impl UiBrowser for egui::Ui {
       // put filters
       if let Kind::PickFile(filters) /*| Kind::SaveFile(filters, _) */ = &kind {
         for FileFilter { name, extensions } in *filters {
-          dialog = dialog.add_filter(name, extensions)
+          dialog = dialog.add_filter(*name, extensions)
         }
       }
 
