@@ -25,3 +25,7 @@ rfd = { version = "0.12", default-features = false, features = ["gtk3"] }
 # Optimize all dependencies even in debug builds:
 [profile.dev.package."*"]
 opt-level = 2
+
+# Change this flat to allow compilation for linux target
+[target.x86_64-unknown-linux-musl]
+rustflags = "-C target-feature=-crt-static"
