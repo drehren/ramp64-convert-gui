@@ -10,6 +10,7 @@ homepage = "https://github.com/drehren/ramp64-convert-gui"
 repository = "https://github.com/drehren/ramp64-convert-gui"
 keywords = ["gui", "util", "retroarch", "save"]
 license = "MIT"
+resolver = "2"
 
 [dependencies]
 eframe = { version = "0.23", default-features = false, features = [
@@ -20,12 +21,14 @@ egui = "0.23"
 open = "5.0"
 paste = "1.0.12"
 ramp64-srm-convert-lib = "0.5"
-rfd = { version = "0.12", default-features = false, features = ["gtk3"] }
+
+[target.'cfg(target_env = "musl")'.dependencies]
+rfd = { version = "0.12", default-features = false, features = [ "xdg-portal" ] }
+
+[target.'cfg(not(target_env = "musl"))'.dependencies]
+rfd = { version = "0.12", default-features = false, features = [ "gtk3" ] }
 
 # Optimize all dependencies even in debug builds:
 [profile.dev.package."*"]
 opt-level = 2
 
-# Change this flat to allow compilation for linux target
-[target.x86_64-unknown-linux-musl]
-rustflags = "-C target-feature=-crt-static"
